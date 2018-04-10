@@ -726,6 +726,13 @@ void SoftVPXEncoder::onQueueFilled(OMX_U32 /* portIndex */) {
             return;
         }
 
+        OMX_ERRORTYPE error = validateInputBuffer(inputBufferHeader);
+        if (error != OMX_ErrorNone) {
+            ALOGE("b/27569635");
+            android_errorWriteLog(0x534e4554, "27569635");
+            notify(OMX_EventError, error, 0, 0);
+            return;
+        }
         const uint8_t *source =
             inputBufferHeader->pBuffer + inputBufferHeader->nOffset;
 
@@ -741,14 +748,6 @@ void SoftVPXEncoder::onQueueFilled(OMX_U32 /* portIndex */) {
                 return;
             }
         } else {
-            if (inputBufferHeader->nFilledLen < frameSize) {
-                android_errorWriteLog(0x534e4554, "27569635");
-                notify(OMX_EventError, OMX_ErrorUndefined, 0, 0);
-                return;
-            } else if (inputBufferHeader->nFilledLen > frameSize) {
-                ALOGW("Input buffer contains too many pixels");
-            }
-
             if (mColorFormat == OMX_COLOR_FormatYUV420SemiPlanar) {
                 ConvertYUV420SemiPlanarToYUV420Planar(
                         source, mConversionBuffer, mWidth, mHeight);
@@ -788,7 +787,9 @@ void SoftVPXEncoder::onQueueFilled(OMX_U32 /* portIndex */) {
         if (inputBufferHeader->nTimeStamp > mLastTimestamp) {
             frameDuration = (uint32_t)(inputBufferHeader->nTimeStamp - mLastTimestamp);
         } else {
-            frameDuration = (uint32_t)(((uint64_t)1000000 << 16) / mFramerate);
+            // Use default of 30 fps in case of 0 frame rate.
+            uint32_t framerate = mFramerate ?: (30 << 16);
+            frameDuration = (uint32_t)(((uint64_t)1000000 << 16) / framerate);
         }
         mLastTimestamp = inputBufferHeader->nTimeStamp;
         codec_return = vpx_codec_encode(
@@ -840,6 +841,11 @@ void SoftVPXEncoder::onQueueFilled(OMX_U32 /* portIndex */) {
         inputBufferInfoQueue.erase(inputBufferInfoQueue.begin());
         notifyEmptyBufferDone(inputBufferHeader);
     }
+}
+
+void SoftVPXEncoder::onReset() {
+    releaseEncoder();
+    mLastTimestamp = 0x7FFFFFFFFFFFFFFFLL;
 }
 
 }  // namespace android

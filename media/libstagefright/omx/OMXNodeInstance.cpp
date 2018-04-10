@@ -235,6 +235,8 @@ OMXNodeInstance::OMXNodeInstance(
     mDebugLevelBumpPendingBuffers[1] = 0;
     mMetadataType[0] = kMetadataBufferTypeInvalid;
     mMetadataType[1] = kMetadataBufferTypeInvalid;
+    mGraphicBufferEnabled[0] = false;
+    mGraphicBufferEnabled[1] = false;
     mIsSecure = AString(name).endsWith(".secure");
     atomic_store(&mDying, false);
 }
@@ -375,6 +377,10 @@ status_t OMXNodeInstance::freeNode(OMXMaster *master) {
             LOG_ALWAYS_FATAL("unknown state %s(%#x).", asString(state), state);
             break;
     }
+
+#ifndef SKIP_CVE_2017_13154
+    Mutex::Autolock _l(mLock);
+#endif
 
     ALOGV("[%x:%s] calling destroyComponentInstance", mNodeID, mName);
     OMX_ERRORTYPE err = master->destroyComponentInstance(
@@ -576,6 +582,11 @@ status_t OMXNodeInstance::enableGraphicBuffers(
     err = OMX_SetParameter(mHandle, index, &params);
     CLOG_IF_ERROR(setParameter, err, "%s(%#x): %s:%u en=%d", name, index,
             portString(portIndex), portIndex, enable);
+    if (err == OMX_ErrorNone) {
+        mGraphicBufferEnabled[portIndex] = enable;
+    } else if (enable) {
+        mGraphicBufferEnabled[portIndex] = false;
+    }
     return StatusFromOMXError(err);
 }
 
@@ -773,6 +784,19 @@ status_t OMXNodeInstance::useBuffer(
         return BAD_VALUE;
     }
 
+    if (!mSailed) {
+        ALOGE("b/35467458");
+        android_errorWriteLog(0x534e4554, "35467458");
+        return BAD_VALUE;
+    }
+
+    if (mMetadataType[portIndex] == kMetadataBufferTypeInvalid
+            && mGraphicBufferEnabled[portIndex]) {
+        ALOGE("b/62948670");
+        android_errorWriteLog(0x534e4554, "62948670");
+        return INVALID_OPERATION;
+    }
+
     // metadata buffers are not connected cross process
     BufferMeta *buffer_meta;
     bool isMeta = mMetadataType[portIndex] != kMetadataBufferTypeInvalid;
@@ -883,6 +907,14 @@ status_t OMXNodeInstance::useGraphicBuffer(
         OMX_U32 portIndex, const sp<GraphicBuffer>& graphicBuffer,
         OMX::buffer_id *buffer) {
     Mutex::Autolock autoLock(mLock);
+
+    if (!mGraphicBufferEnabled[portIndex]
+            || mMetadataType[portIndex] != kMetadataBufferTypeInvalid) {
+        // Report error if this is not in graphic buffer mode.
+        ALOGE("b/62948670");
+        android_errorWriteLog(0x534e4554, "62948670");
+        return INVALID_OPERATION;
+    }
 
     // See if the newer version of the extension is present.
     OMX_INDEXTYPE index;
@@ -1044,7 +1076,7 @@ status_t OMXNodeInstance::createGraphicBufferSource(
             usageBits,
             bufferConsumer);
 
-    if ((err = bufferSource->initCheck()) != OK) {
+    if ((err = bufferSource->init()) != OK) {
         return err;
     }
     setGraphicBufferSource(bufferSource);
@@ -1116,6 +1148,12 @@ status_t OMXNodeInstance::allocateBuffer(
         void **buffer_data) {
     Mutex::Autolock autoLock(mLock);
 
+    if (!mSailed) {
+        ALOGE("b/35467458");
+        android_errorWriteLog(0x534e4554, "35467458");
+        return BAD_VALUE;
+    }
+
     BufferMeta *buffer_meta = new BufferMeta(size, portIndex);
 
     OMX_BUFFERHEADERTYPE *header;
@@ -1154,6 +1192,12 @@ status_t OMXNodeInstance::allocateBufferWithBackup(
         OMX::buffer_id *buffer, OMX_U32 allottedSize, OMX_BOOL crossProcess) {
     Mutex::Autolock autoLock(mLock);
     if (allottedSize > params->size() || portIndex >= NELEM(mNumPortBuffers)) {
+        return BAD_VALUE;
+    }
+
+    if (!mSailed) {
+        ALOGE("b/35467458");
+        android_errorWriteLog(0x534e4554, "35467458");
         return BAD_VALUE;
     }
 

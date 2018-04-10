@@ -417,7 +417,6 @@ void AudioPolicyService::releaseInput(audio_io_handle_t input,
     sp<AudioPolicyEffects>audioPolicyEffects;
     {
         Mutex::Autolock _l(mLock);
-        mAudioPolicyManager->releaseInput(input, session);
         audioPolicyEffects = mAudioPolicyEffects;
     }
     if (audioPolicyEffects != 0) {
@@ -426,6 +425,10 @@ void AudioPolicyService::releaseInput(audio_io_handle_t input,
         if(status != NO_ERROR) {
             ALOGW("Failed to release effects on input %d", input);
         }
+    }
+    {
+        Mutex::Autolock _l(mLock);
+        mAudioPolicyManager->releaseInput(input, session);
     }
 }
 
@@ -689,6 +692,7 @@ status_t AudioPolicyService::acquireSoundTriggerSession(audio_session_t *session
                                        audio_io_handle_t *ioHandle,
                                        audio_devices_t *device)
 {
+    Mutex::Autolock _l(mLock);
     if (mAudioPolicyManager == NULL) {
         return NO_INIT;
     }
@@ -698,6 +702,7 @@ status_t AudioPolicyService::acquireSoundTriggerSession(audio_session_t *session
 
 status_t AudioPolicyService::releaseSoundTriggerSession(audio_session_t session)
 {
+    Mutex::Autolock _l(mLock);
     if (mAudioPolicyManager == NULL) {
         return NO_INIT;
     }

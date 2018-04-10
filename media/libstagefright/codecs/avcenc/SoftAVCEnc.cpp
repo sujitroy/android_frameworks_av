@@ -611,6 +611,7 @@ OMX_ERRORTYPE SoftAVC::initEncoder() {
     IV_STATUS_T status;
     WORD32 level;
     uint32_t displaySizeY;
+
     CHECK(!mStarted);
 
     OMX_ERRORTYPE errType = OMX_ErrorNone;
@@ -914,6 +915,9 @@ OMX_ERRORTYPE SoftAVC::releaseEncoder() {
         }
     }
 
+    // clear other pointers into the space being free()d
+    mCodecCtx = NULL;
+
     mStarted = false;
 
     return OMX_ErrorNone;
@@ -1130,6 +1134,12 @@ OMX_ERRORTYPE SoftAVC::setEncodeArgs(
     ps_inp_raw_buf->e_color_fmt = mIvVideoColorFormat;
     source = NULL;
     if ((inputBufferHeader != NULL) && inputBufferHeader->nFilledLen) {
+        OMX_ERRORTYPE error = validateInputBuffer(inputBufferHeader);
+        if (error != OMX_ErrorNone) {
+            ALOGE("b/69065651");
+            android_errorWriteLog(0x534e4554, "69065651");
+            return error;
+        }
         source = inputBufferHeader->pBuffer + inputBufferHeader->nOffset;
 
         if (mInputDataIsMeta) {
@@ -1443,6 +1453,14 @@ void SoftAVC::onQueueFilled(OMX_U32 portIndex) {
         }
     }
     return;
+}
+
+void SoftAVC::onReset() {
+    SoftVideoEncoderOMXComponent::onReset();
+
+    if (releaseEncoder() != OMX_ErrorNone) {
+        ALOGW("releaseEncoder failed");
+    }
 }
 
 }  // namespace android
